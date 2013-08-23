@@ -1,0 +1,194 @@
+Introducing Gophercloud
+A new SDK for Go with big aspirations
+
+Samuel A. Falvo II, @samuelafalvoii, +Samuel Falvo II
+
+If you work extensively with Go and with cloud services, you might be
+interested in a new package called Gophercloud.  My long-term vision for
+Gophercloud is to evolve it to a common API that works across several kinds of
+providers, including but not limited to, OpenStack and Amazon Web Services.
+This will fill a need in the Go community for a cloud provider SDK that will
+not tie the developer to a single vendor.  This creates opportunities for using
+multiple vendors for infrastructure redundancy, as well as minimizing the
+impact of migrating from one vendor to another, should your company become
+unhappy with its current vendor.
+
+Presently, it works with OpenStack's compute API; but, with time and some elbow
+grease, APIs for other services will influence the overall design so as to be
+more provider agnostic.  Through internal development here at Rackspace and
+through external contributions from users of other providers, we hope
+Gophercloud will evolve to meet the needs of dev-ops engineers working in Go
+everywhere.
+
+Code Example
+
+Suppose, for the sake of example, you are in charge of maintaining your
+company's set of web servers, and recently, you've been tasked with writing
+software that monitors how many web servers are up.  To make this even more
+contrived, let's say there's some technical reason you cannot use your
+provider's load-balancing or autoscale features.  Your hypothetical boss
+clarifies, "At a minimum, we need 10 web server instances at any given time!
+Make it happen!"  You'd probably end up with a program not too different from
+listing 1.
+
+The main function parses the command-line arguments, and performs a basic
+sanity check on the username and password provided.  Where possible, we fully
+parameterize the operation of the program through command-line arguments.  You
+could use environment variables as well; this was as convenient for our needs.
+Next, we attempt to authenticate with the provider using a username and
+password.  We enable automatic reauthentication, so that we don't have to worry
+about doing this ourselves as the program runs.  This is the type of program
+that runs for months or years, so the simpler we can make our lives, the
+better.  Once authenticated, we need to get a handle to the cloud servers API.
+We do this by searching the service catalog returned by the authentication step
+earlier.  Finally, we enter an endless loop that attempts to re-fortify the web
+servers every five minutes or so.
+
+Looking at the fortifyWebServers function, the first thing we do is announce
+when we enter or leave the step in the software's log.  Next, we get a list of
+servers already in the account.  We tally which of these servers are production
+servers based on a naming convention.  If your organization uses custom
+metadata for this, you could inspect the servers.Metadata map for this
+information as well.  Finally, we instantiate a new server as long as we have
+fewer than the alloted minimum amount.
+
+Servers are created with the CreateServer() method, found inside the
+addOneMoreServer helper.
+
+Where We're Going Tomorrow
+
+At present, Gophercloud's API only offers support for OpenStack's Cloud Server
+API.  However, we're working to improve the depth and breadth of the API not
+only within the realm of OpenStack itself, but also across different cloud
+providers as well.  For instance, discussions around a design document for
+cloud files support is happening now on our developers mailing list.
+Development work on cloud files support will probably commence in a few weeks
+time.  In addition, we have plans for DNS and database support as well.
+
+I have deliberately chosen to take incremental steps when building Gophercloud.
+Incremental development trumps a conceptually cleaner, but more encompassing,
+design which has no backing code to demonstrate its viability.  It allows us to
+learn what works and what doesn't early in its development history.  As more
+contributors lend their expertise and we gain more experience with other
+providers, I'm confident that Gophercloud will gain the ability to work with
+other providers as easily as it would with OpenStack.  My resources are
+limited, however, which is why we are especially grateful for external
+contributions for different APIs.
+
+Gophercloud currently has a semantic version of 0.0, implying its interface is
+still in flux as we try to increase our understanding of how the API should
+work.  However, where possible, we design for upward-compatibility.  Once we
+reach version 1.0, everything adheres to the Go community standard of never
+breaking backward compatibility.  Should any breaking change need to happen, a
+new repository will be created for that purpose.
+
+Conclusion
+
+I demonstrated how to write cloud server management software with Gophercloud,
+and given a forward-looking view of where we're headed.  I'm hoping to attract
+sufficient interest from the community to help me realize my goals for
+Gophercloud sooner rather than later.  Visit us at http://gophercloud.io, and
+join our developers mailing list.  We'd love to see you!
+
+
+Listing 1.
+
+
+package main
+
+import (
+	"crypto/rand"
+	"flag"
+	"fmt"
+	"github.com/rackspace/gophercloud"
+	"log"
+	"strings"
+	"time"
+)
+
+var provider = flag.String("provider", "rackspace-us", "OpenStack provider of choice")
+var username = flag.String("username", "", "Cloud account username")
+var password = flag.String("password", "", "Cloud account password")
+var imageRef = flag.String("imageRef", "c52a0ca6-c1f2-4cd1-b7d6-afbcd1ebda22", "Web server image ID")
+var flavorRef = flag.String("flavorRef", "2", "Web server flavor ID")
+var minimumServerCount = flag.Int("count", 10, "Minimum number of servers")
+var prodPrefix = flag.String("prefix", "ProdWeb-", "Prefix used to identify production servers")
+
+func main() {
+	flag.Parse()
+	if *username == "" || *password == "" {
+		log.Fatal("Either username or password is invalid")
+	}
+
+	acc, err := gophercloud.Authenticate(*provider, gophercloud.AuthOptions{
+		Username:    *username,
+		Password:    *password,
+		AllowReauth: true,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	api, err := gophercloud.ServersApi(acc, gophercloud.ApiCriteria{
+		Name:      "cloudServersOpenStack",
+		VersionId: "2",
+		UrlChoice: gophercloud.PublicURL,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for {
+		err := fortifyWebServers(api)
+		if err != nil {
+			log.Print(err)
+		}
+		time.Sleep(5 * time.Minute)
+	}
+}
+
+func fortifyWebServers(api gophercloud.CloudServersProvider) error {
+	log.Print("Fortification check starting.")
+	defer log.Print("Fortification check complete.")
+
+	servers, err := api.ListServers()
+	if err != nil {
+		return err
+	}
+
+	productionServers := 0
+	for _, s := range servers {
+		if strings.HasPrefix(s.Name, *prodPrefix) {
+			productionServers++
+		}
+	}
+
+	for productionServers < *minimumServerCount {
+		err := addOneMoreServer(api)
+		if err != nil {
+			return err
+		}
+		productionServers++
+	}
+
+	return nil
+}
+
+func addOneMoreServer(api gophercloud.CloudServersProvider) error {
+	_, err := api.CreateServer(gophercloud.NewServer{
+		Name:      fmt.Sprintf("%s%s", *prodPrefix, randomString(16)),
+		ImageRef:  *imageRef,
+		FlavorRef: *flavorRef,
+	})
+	return err
+}
+
+func randomString(length int) string {
+	const alphanum = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+	var bytes = make([]byte, length)
+	rand.Read(bytes)
+	for i, b := range bytes {
+		bytes[i] = alphanum[b%byte(len(alphanum))]
+	}
+	return string(bytes)
+}
