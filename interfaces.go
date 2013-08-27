@@ -170,4 +170,7 @@ type CloudServersProvider interface {
 
 	// ShowKeyPair will yield the named keypair.
 	ShowKeyPair(name string) (KeyPair, error)
+
+	//No!
+	ListVolumes() ([]Volume, error)
 }
