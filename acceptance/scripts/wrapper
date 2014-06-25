@@ -1,0 +1,9 @@
+#!/bin/bash
+export GOPATH=`pwd`/go
+export GOPHERCLOUD=$GOPATH/src/github.com/rackspace/gophercloud
+FILE=`echo $1 | sed 's#./##'`
+export SDK_PROVIDER=$OS_AUTH_URL
+export SDK_USERNAME=$RAX_USERNAME
+export SDK_PASSWORD="unused" # we use the SDK_API_KEY
+export SDK_API_KEY=$RAX_API_KEY
+go run $FILE libargs.go
