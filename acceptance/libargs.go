@@ -30,7 +30,7 @@ func getCredentials() (provider, username, password, apiKey string) {
 	}
 
 	if strings.Contains(provider, "rackspace") && (authURL != "") {
-		provider = authURL + "/v2.0/tokens"
+		provider = authURL + "/tokens"
 	}
 
 	return
